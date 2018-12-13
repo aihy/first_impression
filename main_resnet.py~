@@ -150,7 +150,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
         target = target.float().cuda()
         target_var = torch.autograd.Variable(target)
         output = model(input_var)
-        print(output)
+	print(output)
         loss = criterion(output, target_var)
 
         # measure accuracy and record loss

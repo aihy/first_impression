@@ -1,5 +1,6 @@
-python main_resnet.py \
+python -u main_resnet.py \
 	--arch=resnet18 \
-	--workers=30 \
+	--workers=3 \
 	--epochs=40 \
-	--batch_size=10 |tee main.log
+	--print-freq=1 \
+	--batch_size=120 |tee main.log

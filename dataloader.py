@@ -17,7 +17,7 @@ class MyDataset(data.Dataset):
                                    d['neuroticism'][line[:19]],
                                    d['agreeableness'][line[:19]],
                                    d['conscientiousness'][line[:19]],
-                                   d['interview'][line[:19]],
+                                 #  d['interview'][line[:19]],
                                    d['openness'][line[:19]]]))
         self.imgs = imgs
         self.dir_path = dir_path

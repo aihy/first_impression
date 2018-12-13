@@ -117,7 +117,6 @@ class ResNet(nn.Module):
         self.fc3 = nn.Linear(512 * block.expansion, num_classes)
         self.fc4 = nn.Linear(512 * block.expansion, num_classes)
         self.fc5 = nn.Linear(512 * block.expansion, num_classes)
-        self.fc6 = nn.Linear(512 * block.expansion, num_classes)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -160,8 +159,7 @@ class ResNet(nn.Module):
         x3 = self.fc3(x)
         x4 = self.fc4(x)
         x5 = self.fc5(x)
-        x6 = self.fc6(x)
-        x = torch.cat((x1,x2,x3,x4,x5,x6),0).squeeze()
+        x = torch.cat((x1,x2,x3,x4,x5),0).squeeze()
         return x
 
 

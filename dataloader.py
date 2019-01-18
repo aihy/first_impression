@@ -8,17 +8,22 @@ from PIL import Image
 class MyDataset(data.Dataset):
     def __init__(self, jsonfile, jpglistfile, dir_path, new_width, new_height, transform=None):
         imgs = []
-        f = open(jsonfile, "r")
-        d = json.load(f)
-        f.close()
-        with open(jpglistfile, "r") as fp:
-            for line in fp:
-                imgs.append((line[:-1], [d['extraversion'][line[:19]],
-                                   d['neuroticism'][line[:19]],
-                                   d['agreeableness'][line[:19]],
-                                   d['conscientiousness'][line[:19]],
-                                 #  d['interview'][line[:19]],
-                                   d['openness'][line[:19]]]))
+        if jsonfile[-4:] == "xixi":
+            with open(jpglistfile, "r") as fp:
+                for line in fp:
+                    imgs.append((line[:-1], [0,0,0,0,0]))
+        else:
+             f = open(jsonfile, "r")
+             d = json.load(f)
+             f.close()
+             with open(jpglistfile, "r") as fp:
+                 for line in fp:
+                     imgs.append((line[:-1], [d['extraversion'][line[:19]],
+                                        d['neuroticism'][line[:19]],
+                                        d['agreeableness'][line[:19]],
+                                        d['conscientiousness'][line[:19]],
+                                      #  d['interview'][line[:19]],
+                                        d['openness'][line[:19]]]))
         self.imgs = imgs
         self.dir_path = dir_path
         self.height = new_height

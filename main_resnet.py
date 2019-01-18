@@ -39,7 +39,9 @@ parser.add_argument('--print-freq', default=1, type=int,
                     metavar='N', help='print frequency (default: 20)')
 parser.add_argument('--save-freq', default=1, type=int,
                     metavar='N', help='save frequency (default: 200)')
-parser.add_argument('--resume', default='../checkpoints_50', type=str, metavar='PATH',
+parser.add_argument('--resume', default='../checkpoints', type=str, metavar='PATH',
+                    help='path to checkpoints (default: ../checkpoints)')
+parser.add_argument('--resumepath', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
 parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
                     help='evaluate model on validation set')
@@ -62,7 +64,25 @@ def main():
     optimizer = torch.optim.SGD(model.parameters(), args.lr,
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
+
+    if args.resumepath:
+        if os.path.isfile(args.resumepath):
+            print("=> loading checkpoint '{}'".format(args.resumepath))
+            checkpoint = torch.load(args.resumepath)
+            args.start_epoch = checkpoint['epoch']
+            best_prec = checkpoint['best_prec']
+            model.load_state_dict(checkpoint['state_dict'])
+            print("=> loaded checkpoint '{}' (epoch {}, best_prec {})"
+                  .format(args.evaluate, checkpoint['epoch'], best_prec))
+        else:
+            print("=> no checkpoint found at '{}'".format(args.resumepath))
+            return
+
+
+
     cudnn.benchmark = True
+
+    
 
     # data transform
     mean = [0.485, 0.456, 0.406]
@@ -93,6 +113,9 @@ def main():
     train_loader = DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=True, num_workers=args.workers,pin_memory=True)
     val_loader = DataLoader(dataset=val_data, batch_size=args.batch_size, shuffle=False, num_workers=args.workers,pin_memory=True)
 
+    if args.evaluate:
+        validate(val_loader,model,criterion)
+        return
     for epoch in range(args.start_epoch, args.epochs):
         print('epoch: ' + str(epoch + 1))
         adjust_learning_rate(optimizer, epoch)
@@ -100,11 +123,11 @@ def main():
         # train for one epoch
         train(train_loader, model, criterion, optimizer, epoch)
         # evaluate on validation set
-        prec = validate(val_loader, model, criterion)
+        #prec = validate(val_loader, model, criterion)
 
         # remember best prec and save checkpoint
-        is_best = prec > best_prec
-        best_prec = max(prec, best_prec)
+        #is_best = prec > best_prec
+        #best_prec = max(prec, best_prec)
 
         if (epoch + 1) % args.save_freq == 0:
             checkpoint_name = "%03d_%s" % (epoch + 1, "checkpoint.pth.tar")
@@ -114,7 +137,7 @@ def main():
                 'state_dict': model.state_dict(),
                 'best_prec': best_prec,
                 'optimizer': optimizer.state_dict(),
-            }, is_best, checkpoint_name, args.resume)
+            }, 0, checkpoint_name, args.resume)
 
 
 
@@ -184,16 +207,18 @@ def validate(val_loader, model, criterion):
 
     end = time.time()
     for i, (input, target) in enumerate(val_loader):
-        input = input.float().cuda()
+        input = input.float()
         target = torch.cat(target,0)
         target = target.float().cuda()
-        input_var = torch.autograd.Variable(input, volatile=True)
-        target_var = torch.autograd.Variable(target, volatile=True)
+        with torch.no_grad():
+            input_var = torch.autograd.Variable(input)
+            target_var = torch.autograd.Variable(target)
 
         # compute output
         output = model(input_var)
         loss = criterion(output, target_var)
 
+        loss.backward()
         # measure accuracy and record loss
         prec = accuracy(output, target_var, loss)
         losses.update(loss.data.item(), input.size(0))

@@ -5,18 +5,20 @@ import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.nn.parallel
 import torch.optim
 from torch.utils.data import DataLoader
 from torchvision import transforms
+import torchvision.models as models
 
-import resnet
 from dataloader import *
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--dir_path', default='/home/zihao_wang/demo/first-impression-v2/data/')
+parser.add_argument(
+    '--dir_path', default='/home/zihao_wang/indata/first_impression/data/')
 parser.add_argument('--arch', default='resnet50',
-                    choices=['resnet18','resnet34','resnet50', 'resnet101', 'resnet152'])
+                    choices=['resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152'])
 parser.add_argument('--workers', default=8, type=int, metavar='N',
                     help='number of data loading workers (default: 8)')
 parser.add_argument('--epochs', default=40, type=int, metavar='N',
@@ -61,7 +63,7 @@ def main():
     # define loss function (criterion) and optimizer
     # criterion = nn.CrossEntropyLoss().cuda()
     criterion = nn.L1Loss().cuda()
-    optimizer = torch.optim.SGD(model.parameters(), args.lr,
+    optimizer = torch.optim.SGD(model.module.fc.parameters(), args.lr,
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
 
@@ -78,11 +80,7 @@ def main():
             print("=> no checkpoint found at '{}'".format(args.resumepath))
             return
 
-
-
     cudnn.benchmark = True
-
-    
 
     # data transform
     mean = [0.485, 0.456, 0.406]
@@ -100,21 +98,23 @@ def main():
 
     train_data = MyDataset(os.path.join(args.dir_path, 'annotation_training.json'),
                            os.path.join(args.dir_path, 'train-jpglist.txt'),
-                           os.path.join(args.dir_path, 'train-images'),
+                           os.path.join(args.dir_path, 'train-images-face'),
                            args.new_width,
                            args.new_length,
                            train_transform)
     val_data = MyDataset(os.path.join(args.dir_path, 'annotation_validation.json'),
                          os.path.join(args.dir_path, 'val-jpglist.txt'),
-                         os.path.join(args.dir_path, 'val-images'),
+                         os.path.join(args.dir_path, 'val-images-face'),
                          args.new_width,
                          args.new_length,
                          val_transform)
-    train_loader = DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=True, num_workers=args.workers,pin_memory=True)
-    val_loader = DataLoader(dataset=val_data, batch_size=args.batch_size, shuffle=False, num_workers=args.workers,pin_memory=True)
+    train_loader = DataLoader(dataset=train_data, batch_size=args.batch_size,
+                              shuffle=True, num_workers=args.workers, pin_memory=True)
+    val_loader = DataLoader(dataset=val_data, batch_size=args.batch_size,
+                            shuffle=False, num_workers=args.workers, pin_memory=True)
 
     if args.evaluate:
-        validate(val_loader,model,criterion)
+        validate(val_loader, model, criterion)
         return
     for epoch in range(args.start_epoch, args.epochs):
         print('epoch: ' + str(epoch + 1))
@@ -123,28 +123,53 @@ def main():
         # train for one epoch
         train(train_loader, model, criterion, optimizer, epoch)
         # evaluate on validation set
-        #prec = validate(val_loader, model, criterion)
+        prec = validate(val_loader, model, criterion)
 
         # remember best prec and save checkpoint
-        #is_best = prec > best_prec
-        #best_prec = max(prec, best_prec)
+        is_best = prec > best_prec
+        best_prec = max(prec, best_prec)
 
-        if (epoch + 1) % args.save_freq == 0:
-            checkpoint_name = "%03d_%s" % (epoch + 1, "checkpoint.pth.tar")
-            save_checkpoint({
+        if is_best:
+            torch.save({
                 'epoch': epoch + 1,
                 'arch': args.arch,
                 'state_dict': model.state_dict(),
                 'best_prec': best_prec,
                 'optimizer': optimizer.state_dict(),
-            }, 0, checkpoint_name, args.resume)
+            }, "best_checkpoint.pth.tar")
 
+
+class XixiModel(nn.Module):
+    def __init__(self, model):
+        super().__init__()
+        self.resnet_layer = nn.Sequential(*list(model.children())[:-2])
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.maxpool = nn.AdaptiveMaxPool2d((1, 1))
+        self.fc = nn.Linear(1024, 5)
+
+    def forward(self, x):
+        x = self.resnet_layer(x)
+        x1 = self.avgpool(x)
+        x1 = x1.view(x1.size(0), -1)
+        x1 = F.normalize(x1)
+        x2 = self.maxpool(x)
+        x2 = x2.view(x2.size(0), -1)
+        x2 = F.normalize(x2)
+        x = torch.cat((x1, x2), dim=1)
+        x = self.fc(x)
+        x = torch.sigmoid(x)
+        return x
 
 
 def build_model():
     # model_name = "rgb_" + args.arch
-    model_name = args.arch
-    model = getattr(resnet, model_name)(pretrained=False, num_classes=1)
+    #    model_name = args.arch
+    #    model = getattr(resnet, model_name)(pretrained=False, num_classes=1)
+    model = models.resnet34(pretrained=True)
+    for param in model.parameters():
+        param.requires_grad = False
+    model = XixiModel(model)
+    model.cuda()
     model = torch.nn.DataParallel(model).cuda()
     # model = model.cuda()
     return model
@@ -163,17 +188,17 @@ def train(train_loader, model, criterion, optimizer, epoch):
     for i, (input, target) in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
-
-        input = input.float().cuda()
-        input_var = torch.autograd.Variable(input)
-        target = torch.cat(target,0)
-        target = target.float().cuda()
-        target_var = torch.autograd.Variable(target)
-        output = model(input_var)
-        loss = criterion(output, target_var)
-
+        # input = input.float().cuda()
+        # input_var = torch.autograd.Variable(input)
+        # target = torch.cat(target, 0)
+        # target = target.float().cuda()
+        # target_var = torch.autograd.Variable(target)
+        input = input.cuda()
+        target = target.cuda()
+        output = model(input)
+        loss = criterion(output, target)
         # measure accuracy and record loss
-        prec = accuracy(output, target_var, loss)
+        prec = accuracy(output, target, loss)
         losses.update(loss.data.item(), input.size(0))
         precs.update(prec)
     #    top1.update(prec[0], input.size(0))
@@ -193,8 +218,8 @@ def train(train_loader, model, criterion, optimizer, epoch):
                   'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
                   'Prec {precs.val:.3f} ({precs.avg:.3f})\t'.format(
-                epoch, i, len(train_loader), batch_time=batch_time,
-                data_time=data_time, loss=losses, precs=precs))
+                      epoch, i, len(train_loader), batch_time=batch_time,
+                      data_time=data_time, loss=losses, precs=precs))
 
 
 def validate(val_loader, model, criterion):
@@ -207,20 +232,22 @@ def validate(val_loader, model, criterion):
 
     end = time.time()
     for i, (input, target) in enumerate(val_loader):
-        input = input.float()
-        target = torch.cat(target,0)
-        target = target.float().cuda()
-        with torch.no_grad():
-            input_var = torch.autograd.Variable(input)
-            target_var = torch.autograd.Variable(target)
+        #         input = input.float()
+        #         target = torch.cat(target, 0)
+        #         target = target.float().cuda()
+        #         with torch.no_grad():
+        #             input_var = torch.autograd.Variable(input)
+        #             target_var = torch.autograd.Variable(target)
 
         # compute output
-        output = model(input_var)
-        loss = criterion(output, target_var)
+        input = input.cuda()
+        target = target.cuda()
+        output = model(input)
+        loss = criterion(output, target)
 
         loss.backward()
         # measure accuracy and record loss
-        prec = accuracy(output, target_var, loss)
+        prec = accuracy(output, target, loss)
         losses.update(loss.data.item(), input.size(0))
         precs.update(prec)
 
@@ -233,8 +260,8 @@ def validate(val_loader, model, criterion):
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
                   'Prec {precs.val:.3f} ({precs.avg:.3f})'.format(
-                i, len(val_loader), batch_time=batch_time, loss=losses,
-                precs=precs))
+                      i, len(val_loader), batch_time=batch_time, loss=losses,
+                      precs=precs))
 
     print(' * Prec {precs.avg:.3f} '
           .format(precs=precs))
@@ -278,7 +305,7 @@ def adjust_learning_rate(optimizer, epoch):
 
 
 def accuracy(output, target, loss):
-    A=1-loss
+    A = 1-loss
     return A
 
 

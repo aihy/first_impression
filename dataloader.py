@@ -1,4 +1,5 @@
 import json
+import torch
 import os
 
 import torch.utils.data as data
@@ -38,7 +39,7 @@ class MyDataset(data.Dataset):
         img = img.resize((self.width, self.height), Image.ANTIALIAS)
         if self.transform is not None:
             img = self.transform(img)
-        return img, label
+        return img, torch.tensor(label)
 
     def __len__(self):
         return len(self.imgs)
